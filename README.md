@@ -1,4 +1,4 @@
-# ETH Daddy 
+# Ethentity
 
 ## Technology Stack & Tools
 
