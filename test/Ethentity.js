@@ -5,11 +5,11 @@ const tokens = (n) => {
 }
 
 describe("Ethentity", () => {
-  let ethentity
+  let ethDaddy
   let deployer, owner1
 
   const NAME = "Ethentity"
-  const SYMBOL = "EID"
+  const SYMBOL = "EthID"
 
   beforeEach(async () => {
     // Setup accounts
