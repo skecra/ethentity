@@ -1,72 +1,46 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.19;
+pragma solidity ^0.8.9;
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/Counters.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/security/Pausable.sol";
 
-contract Ethentity is ERC721, Ownable, ReentrancyGuard, Pausable {
+contract Ethentity is ERC721, ReentrancyGuard {
     using Counters for Counters.Counter;
-    using SafeERC20 for IERC20;
-
-    // HARD-KODIRANA PERPER (PRP) ADRESA — promijeni po mreži ako treba
-    address public constant PRP = 0xf412de660d3914E2E5CdB5A476E35d291150C88D;
-
     Counters.Counter private _domainIds;
+    
+    address public owner;
+    IERC20 public immutable prpToken = IERC20(0xf412de660d3914E2E5CdB5A476E35d291150C88D);
 
     struct Domain {
         string name;
-        uint256 regPrice;     // PRP cijena registracije
-        uint256 renewPrice;   // PRP cijena za 1 godinu obnove
+        uint256 cost;
         bool isOwned;
-        uint64  expiresAt;
+        uint256 expiresAt;
         string ipfsHash;
         uint256 storageLimit; // MB
-        uint256 usedStorage;  // MB
-        bool forSale;         // sekundarna prodaja
-        uint256 salePrice;    // PRP cijena sekundarne prodaje
+        uint256 usedStorage; // MB
     }
 
+    // Mappings
     mapping(uint256 => Domain) public domains;
-    mapping(string => uint256) public nameToId; // normalized name -> id
+    mapping(string => uint256) public nameToId; // ime -> id domena
     mapping(uint256 => string[]) public subdomains;
     mapping(uint256 => mapping(string => string)) public subdomainContents;
-
     mapping(address => uint256[]) public userDomains;
-    mapping(uint256 => uint256) private _userIndex; // id -> index u userDomains[vlasnik]
+    mapping(string => bool) public premiumWords; // premium keyword lista
 
-    event DomainListed(uint256 indexed id, string indexed name, uint256 regPrice, uint256 renewPrice);
-    event DomainRegistered(uint256 indexed id, string indexed name, address indexed owner, uint64 expiresAt);
-    event DomainRenewed(uint256 indexed id, uint64 newExpiry);
-    event DomainForSale(uint256 indexed id, uint256 price, bool active);
-    event DomainBought(uint256 indexed id, address indexed from, address indexed to, uint256 price);
-    event ContentUploaded(uint256 indexed id, string ipfsHash, uint256 newUsedMB);
-    event StorageUpgraded(uint256 indexed id, uint256 newLimitMB);
-    event SubdomainSet(uint256 indexed parentId, string subdomain, string ipfsHash);
+    // Events
+    event DomainRegistered(uint256 indexed id, string name, address owner);
+    event ContentUploaded(uint256 indexed id, string ipfsHash);
+    event StorageUpgraded(uint256 indexed id, uint256 newLimit);
+    event PremiumWordAdded(string word);
+    event PremiumWordRemoved(string word);
 
-    constructor() ERC721("Ethentity Domains", "ENT") {
-        _pause(); // možeš unpause kad završiš listanje
-    }
-
-    // ---------- helpers ----------
-
-    function _normalize(string memory s) internal pure returns (string memory) {
-        bytes memory b = bytes(s);
-        require(b.length > 0 && b.length <= 253, "name len");
-        for (uint256 i = 0; i < b.length; i++) {
-            bytes1 c = b[i];
-            if (c >= 0x41 && c <= 0x5A) {
-                b[i] = bytes1(uint8(c) + 32); // A-Z -> a-z
-            } else {
-                bool ok = (c >= 0x61 && c <= 0x7A) || (c >= 0x30 && c <= 0x39) || c == 0x2E || c == 0x2D;
-                require(ok, "invalid char");
-            }
-        }
-        return string(b);
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Only owner");
+        _;
     }
 
     modifier onlyDomainOwner(uint256 id) {
@@ -74,187 +48,165 @@ contract Ethentity is ERC721, Ownable, ReentrancyGuard, Pausable {
         _;
     }
 
-    modifier notExpired(uint256 id) {
-        require(domains[id].expiresAt >= block.timestamp, "Domain expired");
-        _;
+    constructor() ERC721("Ethentity Domains", "ENT") {
+        owner = msg.sender;
+
+        // Dodaj neke default premium rijeci
+        premiumWords["crypto"] = true;
+        premiumWords["nft"] = true;
+        premiumWords["blockchain"] = true;
+        premiumWords["dao"] = true;
+        premiumWords["web3"] = true;
+        premiumWords["eth"] = true;
     }
 
-    // ---------- administracija ----------
+    // ---- Pricing logika ----
+    function calculatePrice(string memory name) public view returns (uint256) {
+        bytes memory b = bytes(name);
+        uint256 basePrice;
 
-    function pause() external onlyOwner { _pause(); }
-    function unpause() external onlyOwner { _unpause(); }
+        // Dužinski pricing
+        if (b.length <= 3) {
+            basePrice = 300 ether; // 300 PRP
+        } else if (b.length <= 5) {
+            basePrice = 150 ether; // 150 PRP
+        } else {
+            basePrice = 50 ether; // 50 PRP
+        }
 
-    function listDomain(string memory rawName, uint256 regPrice, uint256 renewPricePerYear)
-        external
-        onlyOwner
-        whenNotPaused
-    {
-        string memory name = _normalize(rawName);
-        require(nameToId[name] == 0, "Domain taken");
+        // Premium riječ dodatak
+        string memory lowerName = _toLower(name);
+        for (uint256 i = 0; i < b.length; i++) {
+            // crude check - proći kroz premium listu
+        }
+
+        // Provjeri da li sadrži premium riječ
+        for (uint256 i = 0; i < _premiumList().length; i++) {
+            string memory word = _premiumList()[i];
+            if (_contains(lowerName, word)) {
+                basePrice += 200 ether; // dodatnih 200 PRP za premium riječ
+            }
+        }
+
+        return basePrice;
+    }
+
+    // Lista premium riječi za internu upotrebu
+    function _premiumList() internal view returns (string[] memory) {
+        uint256 count;
+        // prebroj
+        for (uint256 i = 0; i < 50; i++) {} // placeholder
+        // Ovo ne možemo dinamički vratiti iz mapping-a, ali možemo dodati array storage ako hoćeš
+        string ;
+        fixedList[0] = "crypto";
+        fixedList[1] = "nft";
+        fixedList[2] = "blockchain";
+        fixedList[3] = "dao";
+        fixedList[4] = "web3";
+        fixedList[5] = "eth";
+        return fixedList;
+    }
+
+    // ---- Registracija domena ----
+    function registerDomain(string calldata name) external nonReentrant {
+        require(nameToId[name] == 0, "Name taken");
+
+        uint256 price = calculatePrice(name);
+        prpToken.transferFrom(msg.sender, address(this), price);
 
         _domainIds.increment();
         uint256 newId = _domainIds.current();
 
         domains[newId] = Domain({
             name: name,
-            regPrice: regPrice,
-            renewPrice: renewPricePerYear,
-            isOwned: false,
-            expiresAt: 0,
+            cost: price,
+            isOwned: true,
+            expiresAt: block.timestamp + 365 days,
             ipfsHash: "",
             storageLimit: 100,
-            usedStorage: 0,
-            forSale: false,
-            salePrice: 0
+            usedStorage: 0
         });
 
         nameToId[name] = newId;
-        emit DomainListed(newId, name, regPrice, renewPricePerYear);
+        userDomains[msg.sender].push(newId);
+
+        _safeMint(msg.sender, newId);
+        emit DomainRegistered(newId, name, msg.sender);
     }
 
-    // ---------- primarna kupovina/registracija (SAMO PRP) ----------
-
-    function mintDomain(uint256 id) external nonReentrant whenNotPaused {
-        require(id != 0 && id <= _domainIds.current(), "Invalid ID");
-        Domain storage d = domains[id];
-        require(!d.isOwned, "Already owned");
-        require(d.regPrice > 0, "No price");
-
-        IERC20(PRP).safeTransferFrom(msg.sender, address(this), d.regPrice);
-
-        d.isOwned = true;
-        d.expiresAt = uint64(block.timestamp + 365 days);
-        _safeMint(msg.sender, id);
-        _addUserDomain(msg.sender, id);
-
-        emit DomainRegistered(id, d.name, msg.sender, d.expiresAt);
+    // ---- IPFS ----
+    function setIPFSHash(uint256 id, string memory ipfsHash, uint256 fileSize) public onlyDomainOwner(id) {
+        require(domains[id].usedStorage + fileSize <= domains[id].storageLimit, "Storage limit exceeded");
+        domains[id].ipfsHash = ipfsHash;
+        domains[id].usedStorage += fileSize;
+        emit ContentUploaded(id, ipfsHash);
     }
 
-    // ---------- obnova (SAMO PRP) ----------
-
-    function renewYears(uint256 id, uint256 years_) external nonReentrant onlyDomainOwner(id) whenNotPaused {
-        require(years_ >= 1 && years_ <= 10, "years 1..10");
-        Domain storage d = domains[id];
-
-        uint256 total = d.renewPrice * years_;
-        IERC20(PRP).safeTransferFrom(msg.sender, address(this), total);
-
-        uint64 base = d.expiresAt >= block.timestamp ? d.expiresAt : uint64(block.timestamp);
-        d.expiresAt = base + uint64(years_) * 365 days;
-
-        emit DomainRenewed(id, d.expiresAt);
-    }
-
-    // ---------- sekundarna prodaja (SAMO PRP) ----------
-
-    function listForSale(uint256 id, uint256 price) external onlyDomainOwner(id) whenNotPaused {
-        Domain storage d = domains[id];
-        d.forSale = (price > 0);
-        d.salePrice = price;
-        emit DomainForSale(id, price, d.forSale);
-    }
-
-    function buyDomain(uint256 id) external nonReentrant whenNotPaused {
-        Domain storage d = domains[id];
-        require(d.isOwned, "Not owned");
-        require(d.forSale && d.salePrice > 0, "Not for sale");
-
-        address seller = ownerOf(id);
-
-        IERC20(PRP).safeTransferFrom(msg.sender, seller, d.salePrice);
-
-        _transfer(seller, msg.sender, id);
-
-        d.forSale = false;
-        uint256 soldFor = d.salePrice;
-        d.salePrice = 0;
-
-        emit DomainBought(id, seller, msg.sender, soldFor);
-    }
-
-    // ---------- IPFS / storage (SAMO PRP za upgrade) ----------
-
-    function setIPFSHash(uint256 id, string calldata ipfsHash, uint256 fileSizeMB)
-        external
-        onlyDomainOwner(id)
-        notExpired(id)
-        whenNotPaused
-    {
-        Domain storage d = domains[id];
-        require(d.usedStorage + fileSizeMB <= d.storageLimit, "Storage limit");
-        d.ipfsHash = ipfsHash;
-        d.usedStorage += fileSizeMB;
-        emit ContentUploaded(id, ipfsHash, d.usedStorage);
-    }
-
-    // Napomena: pretpostavka 18 decimala na PRP — 1 PRP/MB = 1e18 wei PRP
-    function upgradeStorage(uint256 id, uint256 additionalMB)
-        external
-        nonReentrant
-        onlyDomainOwner(id)
-        whenNotPaused
-    {
-        uint256 cost = additionalMB * 1e18;
-        IERC20(PRP).safeTransferFrom(msg.sender, address(this), cost);
+    function upgradeStorage(uint256 id, uint256 additionalMB) public onlyDomainOwner(id) {
+        uint256 upgradeCost = additionalMB * 1 ether;
+        prpToken.transferFrom(msg.sender, address(this), upgradeCost);
         domains[id].storageLimit += additionalMB;
         emit StorageUpgraded(id, domains[id].storageLimit);
     }
 
-    function addSubdomain(uint256 parentId, string calldata subdomain, string calldata ipfsHash, uint256 fileSizeMB)
-        external
-        onlyDomainOwner(parentId)
-        notExpired(parentId)
-        whenNotPaused
-    {
-        Domain storage d = domains[parentId];
-        require(d.usedStorage + fileSizeMB <= d.storageLimit, "Storage limit");
+    // ---- Subdomain ----
+    function addSubdomain(uint256 parentId, string memory subdomain, string memory ipfsHash, uint256 fileSize) public onlyDomainOwner(parentId) {
+        require(domains[parentId].usedStorage + fileSize <= domains[parentId].storageLimit, "Storage limit exceeded");
         subdomains[parentId].push(subdomain);
         subdomainContents[parentId][subdomain] = ipfsHash;
-        d.usedStorage += fileSizeMB;
-        emit SubdomainSet(parentId, subdomain, ipfsHash);
+        domains[parentId].usedStorage += fileSize;
     }
 
-    // ---------- čitanje ----------
-
-    function getDomain(uint256 id) external view returns (Domain memory) { return domains[id]; }
-
-    function idOf(string calldata rawName) external view returns (uint256) {
-        string memory name = _normalize(rawName);
-        return nameToId[name];
+    // ---- Renew ----
+    function renew(uint256 id, uint256 duration) public onlyDomainOwner(id) {
+        uint256 cost = (domains[id].cost * duration) / 365 days;
+        prpToken.transferFrom(msg.sender, address(this), cost);
+        domains[id].expiresAt += duration;
     }
 
-    function getSubdomains(uint256 id) external view returns (string[] memory) { return subdomains[id]; }
-
-    // ---------- povlačenje PRP ----------
-
-    function withdrawPRP(address to) external onlyOwner {
-        uint256 bal = IERC20(PRP).balanceOf(address(this));
-        IERC20(PRP).safeTransfer(to, bal);
+    // ---- Premium riječ administracija ----
+    function addPremiumWord(string calldata word) external onlyOwner {
+        premiumWords[_toLower(word)] = true;
+        emit PremiumWordAdded(word);
     }
 
-    // ---------- ERC721 hooks: sync userDomains + poštuj pause ----------
-
-    function _beforeTokenTransfer(address from, address to, uint256 tokenId, uint256 batchSize) internal override {
-        super._beforeTokenTransfer(from, to, tokenId, batchSize);
-        require(!paused(), "paused");
-        if (from != address(0)) { _removeUserDomain(from, tokenId); }
-        if (to != address(0))   { _addUserDomain(to, tokenId); }
+    function removePremiumWord(string calldata word) external onlyOwner {
+        premiumWords[_toLower(word)] = false;
+        emit PremiumWordRemoved(word);
     }
 
-    function _addUserDomain(address u, uint256 id) internal {
-        _userIndex[id] = userDomains[u].length;
-        userDomains[u].push(id);
-    }
-
-    function _removeUserDomain(address u, uint256 id) internal {
-        uint256 idx = _userIndex[id];
-        uint256 last = userDomains[u].length - 1;
-        if (idx != last) {
-            uint256 lastId = userDomains[u][last];
-            userDomains[u][idx] = lastId;
-            _userIndex[lastId] = idx;
+    // ---- Helperi ----
+    function _toLower(string memory str) internal pure returns (string memory) {
+        bytes memory bStr = bytes(str);
+        for (uint256 i = 0; i < bStr.length; i++) {
+            if ((uint8(bStr[i]) >= 65) && (uint8(bStr[i]) <= 90)) {
+                bStr[i] = bytes1(uint8(bStr[i]) + 32);
+            }
         }
-        userDomains[u].pop();
-        delete _userIndex[id];
+        return string(bStr);
+    }
+
+    function _contains(string memory where, string memory what) internal pure returns (bool) {
+        bytes memory whereBytes = bytes(where);
+        bytes memory whatBytes = bytes(what);
+
+        if (whatBytes.length > whereBytes.length) return false;
+
+        for (uint256 i = 0; i <= whereBytes.length - whatBytes.length; i++) {
+            bool matchFound = true;
+            for (uint256 j = 0; j < whatBytes.length; j++) {
+                if (whereBytes[i + j] != whatBytes[j]) {
+                    matchFound = false;
+                    break;
+                }
+            }
+            if (matchFound) return true;
+        }
+        return false;
+    }
+
+    // Withdraw PRP
+    function withdrawPRP() public onlyOwner {
+        prpToken.transfer(owner, prpToken.balanceOf(address(this)));
     }
 }
