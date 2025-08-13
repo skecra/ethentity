@@ -1,20 +1,20 @@
-// We require the Hardhat Runtime Environment explicitly here. This is optional
-// but useful for running the script in a standalone fashion through `node <script>`.
-//
-// You can also run a script with `npx hardhat run <script>`. If you do that, Hardhat
-// will compile your contracts, add the Hardhat Runtime Environment's members to the
-// global scope, and execute the script.
 const hre = require("hardhat");
 
-const tokens = (n) => {
-  return ethers.utils.parseUnits(n.toString(), 'ether')
-}
-
 async function main() {
+  const Ethentity = await hre.ethers.getContractFactory("Ethentity");
+  const reg = await Ethentity.deploy();             // bez argumenata
+  await reg.deployed();
+  console.log("Ethentity deployed to:", reg.address);
 
+  // (opciono) auto-verify — sačekaj par blokova da Etherscan indeksira
+  if (process.env.ETHERSCAN_API_KEY) {
+    try {
+      await hre.run("verify:verify", { address: reg.address, constructorArguments: [] });
+      console.log("Verified on Etherscan.");
+    } catch (e) {
+      console.log("Verify skipped:", e.message);
+    }
+  }
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+main().catch((e) => { console.error(e); process.exit(1); });
